@@ -54,239 +54,214 @@
   <select id="markerList" size="5" style="width: 150px;" onchange="goToMarker(this.value)"></select>
 </div>
 
-<script>
-/* =========================
-   FIREBASE SETUP
-========================= */
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getDatabase, ref, set, remove, onValue, push } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+// ------------------ Firebase Setup ------------------
 const firebaseConfig = {
-  apiKey: "AIzaSyAMpkD6c0HeJdxp6BVdQGm4P6o6V9ERSJ4",
-  authDomain: "our-wurm.firebaseapp.com",
-  databaseURL: "https://our-wurm-default-rtdb.firebaseio.com",
-  projectId: "our-wurm",
-  storageBucket: "our-wurm.firebasestorage.app",
-  messagingSenderId: "900514136114",
-  appId: "1:900514136114:web:3142efd7e24909a043bc2b"
+  apiKey: "AIzaSyBouZm-4vpPzqOWOBt-PqahnV1-bChf6Rs",
+  authDomain: "our-wurm-map-3fcde.firebaseapp.com",
+  databaseURL: "https://our-wurm-map-3fcde-default-rtdb.firebaseio.com",
+  projectId: "our-wurm-map-3fcde",
+  storageBucket: "our-wurm-map-3fcde.appspot.com",
+  messagingSenderId: "103029165347",
+  appId: "1:103029165347:web:eeba744016040184fd5096"
 };
 
-const app = firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const markersRef = ref(db, "markers");
 
-/* =========================
-   MAP SETUP
-========================= */
-const map = L.map('map', {
-  crs: L.CRS.Simple,
-  minZoom: -2
-});
+let markers = [];
 
-const bounds = [[0,0],[4096,4096]];
-const image = L.imageOverlay('Cadence-terrain-20260224.png', bounds).addTo(map);
+// ------------------ Leaflet Map Setup ------------------
+const mapWidth = 4096, mapHeight = 4096;
+const map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
+const bounds = [[0, 0], [mapHeight, mapWidth]];
+L.imageOverlay('Cadence-terrain-20260224.png', bounds).addTo(map);
 map.fitBounds(bounds);
 
-/* =========================
-   MARKER STORAGE
-========================= */
-let markers = {};
-
-/* =========================
-   CREATE MARKER ICON
-========================= */
+// ------------------ Utilities ------------------
 function createIcon(color, pulse=false) {
   return L.divIcon({
     className: '',
-    html: `<div class="${pulse ? 'pulse' : ''}" style="
-      width:12px;
-      height:12px;
+    html: `<div style="
       background:${color};
+      width:14px; height:14px;
       border-radius:50%;
       border:2px solid black;
-    "></div>`
+      ${pulse ? 'animation:pulse 1s infinite;' : ''}
+    "></div>`,
+    iconSize: [18,18]
   });
 }
 
-/* =========================
-   ADD MARKER TO MAP
-========================= */
-function addMarker(data, key) {
-  if (markers[key]) return;
+function updateMarkerList() {
+  const list = document.getElementById("markerList");
+  list.innerHTML = "";
+  markers.forEach(m => {
+    const option = document.createElement("option");
+    option.value = m.key;
+    option.text = m.name;
+    list.appendChild(option);
+  });
+}
 
-  const marker = L.marker([data.lat, data.lng], {
-    icon: createIcon(data.color || 'yellow')
-  }).addTo(map);
-
-  const label = L.marker([data.lat, data.lng], {
-    icon: L.divIcon({
-      className: 'label',
-      html: data.name,
-      iconSize: [100,20],
-      iconAnchor: [50,25]
-    })
-  }).addTo(map);
-
+// ------------------ Marker Functions ------------------
+function updateMarkerPopup(marker) {
   marker.bindPopup(`
-    <b>${data.name}</b><br>
-    (${Math.round(data.lat)}, ${Math.round(data.lng)})<br><br>
-
-    Name:<br>
-    <input id="name-${key}" value="${data.name}"><br>
-
-    Color:<br>
-    <select id="color-${key}">
-      <option value="yellow">Yellow</option>
-      <option value="red">Red</option>
-      <option value="blue">Blue</option>
-      <option value="green">Green</option>
+    <b>${marker.name}</b><br>
+    (${Math.round(marker.getLatLng().lat)}, ${Math.round(marker.getLatLng().lng)})<br><br>
+    Name: <input id="nameInput-${marker.key}" value="${marker.name}"><br>
+    Color: 
+    <select id="colorInput-${marker.key}">
+      <option ${marker.color==="red"?"selected":""}>red</option>
+      <option ${marker.color==="blue"?"selected":""}>blue</option>
+      <option ${marker.color==="green"?"selected":""}>green</option>
+      <option ${marker.color==="yellow"?"selected":""}>yellow</option>
+      <option ${marker.color==="purple"?"selected":""}>purple</option>
     </select><br><br>
-
-    <button onclick="saveEdit('${key}')">Save</button>
-    <button onclick="deleteMarker('${key}')">Delete</button>
+    <button onclick="saveEdit('${marker.key}')">Save</button>
+    <button onclick="deleteMarker('${marker.key}')">Delete</button>
   `);
-
-  markers[key] = { marker, label, data };
 }
 
-/* =========================
-   REMOVE MARKER
-========================= */
-function removeMarker(key) {
-  if (!markers[key]) return;
+function createMarker(lat, lng, name="Unnamed", color="yellow", key=null) {
+  if (!key) key = push(ref(db, 'markers')).key;
 
-  map.removeLayer(markers[key].marker);
-  map.removeLayer(markers[key].label);
-  delete markers[key];
+  const marker = L.marker([lat, lng], { icon: createIcon(color) }).addTo(map);
+  marker.name = name;
+  marker.color = color;
+  marker.key = key;
+
+  const label = L.marker([lat, lng], {
+    icon: L.divIcon({ className: "marker-label", html: name, iconSize: [100,20] }),
+    interactive: false
+  }).addTo(map);
+  marker.label = label;
+
+  updateMarkerPopup(marker);
+  markers.push(marker);
+  updateMarkerList();
+
+  saveMarkerToFirebase(marker);
+  return marker;
 }
 
-/* =========================
-   CLICK TO CREATE MARKER
-========================= */
-map.on('click', function(e) {
-  const name = prompt("Enter deed name:");
-  if (!name) return;
-
-  const newRef = db.ref("markers").push();
-  newRef.set({
-    lat: e.latlng.lat,
-    lng: e.latlng.lng,
-    name: name,
-    color: "yellow"
-  });
+// ------------------ Map Click ------------------
+map.on("click", e => {
+  const name = prompt("Enter marker name:", "Unnamed") || "Unnamed";
+  createMarker(e.latlng.lat, e.latlng.lng, name, "yellow");
 });
 
-/* =========================
-   SAVE EDIT
-========================= */
-window.saveEdit = function(key) {
-  const name = document.getElementById(`name-${key}`).value;
-  const color = document.getElementById(`color-${key}`).value;
-
-  db.ref("markers/" + key).set({
-    ...markers[key].data,
-    name,
-    color
+// ------------------ Firebase Functions ------------------
+function saveMarkerToFirebase(marker) {
+  set(ref(db, `markers/${marker.key}`), {
+    lat: marker.getLatLng().lat,
+    lng: marker.getLatLng().lng,
+    name: marker.name,
+    color: marker.color
   });
-};
+}
 
-/* =========================
-   DELETE MARKER
-========================= */
-window.deleteMarker = function(key) {
-  db.ref("markers/" + key).remove();
-};
+function deleteMarkerFromFirebase(key) {
+  remove(ref(db, `markers/${key}`));
+}
 
-/* =========================
-   REALTIME SYNC
-========================= */
-db.ref("markers").on("value", snapshot => {
+// Listen for Firebase updates
+onValue(markersRef, snapshot => {
   const data = snapshot.val() || {};
 
-  // Remove old
-  for (let key in markers) {
-    if (!data[key]) removeMarker(key);
-  }
+  markers.forEach(m => { if (!data[m.key]) { map.removeLayer(m); map.removeLayer(m.label); } });
+  markers = markers.filter(m => data[m.key]);
 
-  // Add/update
-  for (let key in data) {
-    if (!markers[key]) {
-      addMarker(data[key], key);
+  Object.keys(data).forEach(key => {
+    const mData = data[key];
+    let marker = markers.find(m => m.key === key);
+    if (!marker) {
+      createMarker(mData.lat, mData.lng, mData.name, mData.color, key);
     } else {
-      // update existing
-      markers[key].data = data[key];
-      markers[key].marker.setIcon(createIcon(data[key].color));
-      markers[key].label.setIcon(L.divIcon({
-        className: 'label',
-        html: data[key].name
-      }));
+      marker.setLatLng([mData.lat, mData.lng]);
+      marker.name = mData.name;
+      marker.color = mData.color;
+      marker.setIcon(createIcon(marker.color));
+      marker.label.setLatLng(marker.getLatLng());
+      marker.label.getElement().innerHTML = mData.name;
+      updateMarkerPopup(marker);
     }
-  }
+  });
 
-  updateSearchList();
+  updateMarkerList();
 });
 
-/* =========================
-   SEARCH SYSTEM
-========================= */
+// ------------------ Edit/Delete ------------------
+function saveEdit(key) {
+  const marker = markers.find(m => m.key === key);
+  if (!marker) return;
+
+  marker.name = document.getElementById(`nameInput-${key}`).value;
+  marker.color = document.getElementById(`colorInput-${key}`).value;
+
+  marker.setIcon(createIcon(marker.color));
+  marker.label.getElement().innerHTML = marker.name;
+  marker.closePopup();
+
+  saveMarkerToFirebase(marker);
+  updateMarkerList();
+}
+
+function deleteMarker(key) {
+  const marker = markers.find(m => m.key === key);
+  if (!marker) return;
+
+  map.removeLayer(marker);
+  map.removeLayer(marker.label);
+  markers = markers.filter(m => m.key !== key);
+  deleteMarkerFromFirebase(key);
+  updateMarkerList();
+}
+
+// ------------------ Search ------------------
 function searchMarker() {
-  const input = document.getElementById("searchInput").value.toLowerCase();
+  const term = document.getElementById("searchInput").value.toLowerCase();
+  const marker = markers.find(m => m.name.toLowerCase() === term);
+  if (marker) {
+    map.setView(marker.getLatLng(), map.getZoom());
+    marker.openPopup();
 
-  for (let key in markers) {
-    if (markers[key].data.name.toLowerCase() === input) {
-      jumpToMarker(key);
-      return;
-    }
-  }
-
-  alert("Not found");
+    marker.setIcon(createIcon(marker.color, true));
+    setTimeout(() => marker.setIcon(createIcon(marker.color)), 1200);
+  } else alert("Marker not found!");
 }
 
-function jumpToMarker(key) {
-  const m = markers[key];
-
-  map.setView(m.marker.getLatLng(), 2);
-
-  m.marker.setIcon(createIcon(m.data.color, true));
-
-  setTimeout(() => {
-    m.marker.setIcon(createIcon(m.data.color));
-  }, 2000);
-}
-
-/* =========================
-   SEARCH LIST UI
-========================= */
-function updateSearchList() {
-  const container = document.getElementById("searchResults");
-  container.innerHTML = "";
-
-  for (let key in markers) {
-    const div = document.createElement("div");
-    div.className = "resultItem";
-    div.innerText = markers[key].data.name;
-
-    div.onclick = () => jumpToMarker(key);
-
-    container.appendChild(div);
+function goToMarker(key) {
+  const marker = markers.find(m => m.key === key);
+  if (marker) {
+    map.setView(marker.getLatLng(), map.getZoom());
+    marker.openPopup();
   }
 }
 
-/* =========================
-   FIREBASE TEST
-========================= */
-(function testConnection() {
-  const testRef = db.ref("markers").push();
+// ------------------ Firebase Test (auto-remove) ------------------
+const testKey = push(ref(db, 'markers')).key;
+set(ref(db, `markers/${testKey}`), {
+  lat: 0,
+  lng: 0,
+  name: "TEST CONNECTION",
+  color: "blue"
+})
+.then(() => {
+  alert("✅ Firebase connection test succeeded!");
+  // Delete test marker immediately
+  remove(ref(db, `markers/${testKey}`));
+})
+.catch(err => alert("❌ Firebase connection test failed: " + err));
 
-  testRef.set({
-    lat: 0,
-    lng: 0,
-    name: "test",
-    color: "yellow"
-  }).then(() => {
-    console.log("Firebase connected!");
-    testRef.remove();
-  }).catch(() => {
-    alert("Firebase FAILED");
-  });
-})();
+// ------------------ Make functions global for popup buttons ------------------
+window.deleteMarker = deleteMarker;
+window.saveEdit = saveEdit;
+
 </script>
-
 </body>
 </html>
