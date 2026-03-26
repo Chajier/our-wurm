@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Our Wurm Map</title>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+
+    .marker-label {
+      font-size: 10px;
+      font-weight: bold;
+      text-align: center;
+      color: black;
+      background: rgba(255,255,255,0.7);
+      border-radius: 2px;
+      padding: 1px 2px;
+      pointer-events: none;
+      white-space: nowrap;
+      transform: translate(-50%, -120%);
+    }
+
+    #searchBox {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 5px;
+      border-radius: 5px;
+      box-shadow: 0 0 3px rgba(0,0,0,0.3);
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="searchBox">
+  <input type="text" id="searchInput" placeholder="Search marker...">
+  <button onclick="searchMarker()">Go</button>
+  <br>
+  <select id="markerList" size="5" style="width: 150px;" onchange="goToMarker(this.value)"></select>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getDatabase, ref, set, remove, onValue, push } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+// ------------------ Firebase Setup ------------------
+const firebaseConfig = {
+  apiKey: "AIzaSyBouZm-4vpPzqOWOBt-PqahnV1-bChf6Rs",
+  authDomain: "our-wurm-map-3fcde.firebaseapp.com",
+  databaseURL: "https://our-wurm-map-3fcde-default-rtdb.firebaseio.com",
+  projectId: "our-wurm-map-3fcde",
+  storageBucket: "our-wurm-map-3fcde.appspot.com",
+  messagingSenderId: "103029165347",
+  appId: "1:103029165347:web:eeba744016040184fd5096"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const markersRef = ref(db, "markers");
+
+let markers = [];
+
+// ------------------ Leaflet Map Setup ------------------
+const mapWidth = 4096, mapHeight = 4096;
+const map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
+const bounds = [[0, 0], [mapHeight, mapWidth]];
+L.imageOverlay('Cadence-terrain-20260224.png', bounds).addTo(map);
+map.fitBounds(bounds);
+
+// ------------------ Utilities ------------------
+function createIcon(color, pulse=false) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      background:${color};
+      width:14px; height:14px;
+      border-radius:50%;
+      border:2px solid black;
+      ${pulse ? 'animation:pulse 1s infinite;' : ''}
+    "></div>`,
+    iconSize: [18,18]
+  });
+}
+
+function updateMarkerList() {
+  const list = document.getElementById("markerList");
+  list.innerHTML = "";
+  markers.forEach(m => {
+    const option = document.createElement("option");
+    option.value = m.key;
+    option.text = m.name;
+    list.appendChild(option);
+  });
+}
+
+// ------------------ Marker Functions ------------------
+function updateMarkerPopup(marker) {
+  marker.bindPopup(`
+    <b>${marker.name}</b><br>
+    (${Math.round(marker.getLatLng().lat)}, ${Math.round(marker.getLatLng().lng)})<br><br>
+    Name: <input id="nameInput-${marker.key}" value="${marker.name}"><br>
+    Color: 
+    <select id="colorInput-${marker.key}">
+      <option ${marker.color==="red"?"selected":""}>red</option>
+      <option ${marker.color==="blue"?"selected":""}>blue</option>
+      <option ${marker.color==="green"?"selected":""}>green</option>
+      <option ${marker.color==="yellow"?"selected":""}>yellow</option>
+      <option ${marker.color==="purple"?"selected":""}>purple</option>
+    </select><br><br>
+    <button onclick="saveEdit('${marker.key}')">Save</button>
+    <button onclick="deleteMarker('${marker.key}')">Delete</button>
+  `);
+}
+
+function createMarker(lat, lng, name="Unnamed", color="yellow", key=null) {
+  if (!key) key = push(ref(db, 'markers')).key;
+
+  const marker = L.marker([lat, lng], { icon: createIcon(color) }).addTo(map);
+  marker.name = name;
+  marker.color = color;
+  marker.key = key;
+
+  const label = L.marker([lat, lng], {
+    icon: L.divIcon({ className: "marker-label", html: name, iconSize: [100,20] }),
+    interactive: false
+  }).addTo(map);
+  marker.label = label;
+
+  updateMarkerPopup(marker);
+  markers.push(marker);
+  updateMarkerList();
+
+  saveMarkerToFirebase(marker);
+  return marker;
+}
+
+// ------------------ Map Click ------------------
+map.on("click", e => {
+  const name = prompt("Enter marker name:", "Unnamed") || "Unnamed";
+  createMarker(e.latlng.lat, e.latlng.lng, name, "yellow");
+});
+
+// ------------------ Firebase Functions ------------------
+function saveMarkerToFirebase(marker) {
+  set(ref(db, `markers/${marker.key}`), {
+    lat: marker.getLatLng().lat,
+    lng: marker.getLatLng().lng,
+    name: marker.name,
+    color: marker.color
+  });
+}
+
+function deleteMarkerFromFirebase(key) {
+  remove(ref(db, `markers/${key}`));
+}
+
+// Listen for Firebase updates
+onValue(markersRef, snapshot => {
+  const data = snapshot.val() || {};
+
+  markers.forEach(m => { if (!data[m.key]) { map.removeLayer(m); map.removeLayer(m.label); } });
+  markers = markers.filter(m => data[m.key]);
+
+  Object.keys(data).forEach(key => {
+    const mData = data[key];
+    let marker = markers.find(m => m.key === key);
+    if (!marker) {
+      createMarker(mData.lat, mData.lng, mData.name, mData.color, key);
+    } else {
+      marker.setLatLng([mData.lat, mData.lng]);
+      marker.name = mData.name;
+      marker.color = mData.color;
+      marker.setIcon(createIcon(marker.color));
+      marker.label.setLatLng(marker.getLatLng());
+      marker.label.getElement().innerHTML = mData.name;
+      updateMarkerPopup(marker);
+    }
+  });
+
+  updateMarkerList();
+});
+
+// ------------------ Edit/Delete ------------------
+function saveEdit(key) {
+  const marker = markers.find(m => m.key === key);
+  if (!marker) return;
+
+  marker.name = document.getElementById(`nameInput-${key}`).value;
+  marker.color = document.getElementById(`colorInput-${key}`).value;
+
+  marker.setIcon(createIcon(marker.color));
+  marker.label.getElement().innerHTML = marker.name;
+  marker.closePopup();
+
+  saveMarkerToFirebase(marker);
+  updateMarkerList();
+}
+
+function deleteMarker(key) {
+  const marker = markers.find(m => m.key === key);
+  if (!marker) return;
+
+  map.removeLayer(marker);
+  map.removeLayer(marker.label);
+  markers = markers.filter(m => m.key !== key);
+  deleteMarkerFromFirebase(key);
+  updateMarkerList();
+}
+
+// ------------------ Search ------------------
+function searchMarker() {
+  const term = document.getElementById("searchInput").value.toLowerCase();
+  const marker = markers.find(m => m.name.toLowerCase() === term);
+  if (marker) {
+    map.setView(marker.getLatLng(), map.getZoom());
+    marker.openPopup();
+
+    marker.setIcon(createIcon(marker.color, true));
+    setTimeout(() => marker.setIcon(createIcon(marker.color)), 1200);
+  } else alert("Marker not found!");
+}
+
+function goToMarker(key) {
+  const marker = markers.find(m => m.key === key);
+  if (marker) {
+    map.setView(marker.getLatLng(), map.getZoom());
+    marker.openPopup();
+  }
+}
+
+// ------------------ Firebase Test (auto-remove) ------------------
+const testKey = push(ref(db, 'markers')).key;
+set(ref(db, `markers/${testKey}`), {
+  lat: 0,
+  lng: 0,
+  name: "TEST CONNECTION",
+  color: "blue"
+})
+.then(() => {
+  alert("✅ Firebase connection test succeeded!");
+  // Delete test marker immediately
+  remove(ref(db, `markers/${testKey}`));
+})
+.catch(err => alert("❌ Firebase connection test failed: " + err));
+
+// ------------------ Make functions global for popup buttons ------------------
+window.deleteMarker = deleteMarker;
+window.saveEdit = saveEdit;
+
+</script>
+</body>
+</html>
