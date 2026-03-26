@@ -1,73 +1,45 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>Wurm Map</title>
+  <meta charset="utf-8">
+  <title>Our Wurm Map</title>
 
-  <!-- Leaflet -->
+  <!-- Leaflet CSS & JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- Firebase -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"></script>
-
   <style>
-    html, body {
-      margin: 0;
-      height: 100%;
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+
+    .marker-label {
+      font-size: 10px;
+      font-weight: bold;
+      text-align: center;
+      color: black;
+      background: rgba(255,255,255,0.7);
+      border-radius: 2px;
+      padding: 1px 2px;
+      pointer-events: none;
+      white-space: nowrap;
+      transform: translate(-50%, -120%);
     }
 
-    #map {
-      width: 100%;
-      height: 100%;
-      background: black;
-    }
-
-    /* Search UI */
     #searchBox {
       position: absolute;
       top: 10px;
       left: 10px;
       z-index: 1000;
-      background: rgba(0,0,0,0.7);
-      padding: 10px;
-      border-radius: 8px;
-      color: white;
+      background: white;
+      padding: 5px;
+      border-radius: 5px;
+      box-shadow: 0 0 3px rgba(0,0,0,0.3);
     }
 
-    #searchResults {
-      max-height: 150px;
-      overflow-y: auto;
-      margin-top: 5px;
-    }
-
-    .resultItem {
-      cursor: pointer;
-      padding: 3px;
-    }
-
-    .resultItem:hover {
-      background: rgba(255,255,255,0.2);
-    }
-
-    /* Label above marker */
-    .label {
-      color: white;
-      font-size: 10px;
-      text-align: center;
-      text-shadow: 0 0 3px black;
-    }
-
-    /* Pulse animation */
-    .pulse {
-      animation: pulseAnim 1s infinite;
-    }
-
-    @keyframes pulseAnim {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.6); }
-      100% { transform: scale(1); }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 1; }
     }
   </style>
 </head>
@@ -76,9 +48,10 @@
 <div id="map"></div>
 
 <div id="searchBox">
-  <input type="text" id="searchInput" placeholder="Search marker..." />
-  <button onclick="searchMarker()">Find</button>
-  <div id="searchResults"></div>
+  <input type="text" id="searchInput" placeholder="Search marker...">
+  <button onclick="searchMarker()">Go</button>
+  <br>
+  <select id="markerList" size="5" style="width: 150px;" onchange="goToMarker(this.value)"></select>
 </div>
 
 <script>
